@@ -1,0 +1,6 @@
+[submodule "unity"]
+	path = dns/unity
+	url = https://github.com/ThrowTheSwitch/Unity.git
+[submodule "cJSON"]
+	path = dns/cJSON
+	url = https://github.com/DaveGamble/cJSON.git

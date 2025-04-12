@@ -1,0 +1,32 @@
+##### Fichiers objets, bibliothèques et dépendances
+*.o
+*.s
+*.a
+*.d
+*.Td
+*.lib
+*.so
+*.dylib
+*.dll
+*.dSYM
+
+##### Executables
+*.exe
+a.out
+tries
+build/**/Test*
+
+##### Générateur de documentation
+doc/public/
+
+##### Divers
+.DS_Store
+.vscode/
+compile_flags.txt
+vgcore.*
+test_exit_stat.tmp
+trie.json
+pat.json
+mot.txt
+profondeur.txt
+prefixe.txt
