@@ -68,7 +68,21 @@ DOCPATH = doc/public/
 POSTCOMPILE = mv -f $(DPATH)$*.Td $(DPATH)$*.d && touch $@
 
 ##### Build rules
-.PHONY: all test doc clean cleandoc cleanall FORCE
+.PHONY: help all test doc clean cleandoc cleanall FORCE
+
+help:
+	@echo ""
+	@echo "make [DEBUG=<1|{0}>] target"
+	@echo ""
+	@echo "      target :	help		this message"
+	@echo " 		$(EXEC)	build project executable"
+	@echo " 		all		build '$(EXEC)' executable and run tests"
+	@echo " 		test		run the unit tests"
+	@echo " 		doc		generate code documentation"
+	@echo " 		clean		remove binaries and test results"
+	@echo " 		cleandoc	remove generated documentation artifacts"
+	@echo " 		cleanall	remove all generated files, start anew"
+	@echo ""
 
 $(EXEC): $(OBJ) $(OPATH)cJSON.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
@@ -76,7 +90,7 @@ $(EXEC): $(OBJ) $(OPATH)cJSON.o
 all: $(EXEC) test
 
 $(OPATH)%.o:: $(SPATH)%.cpp $(DPATH)%.d | $(OPATH) $(DPATH)
-	$(CXX) -c $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -o $@ $<
+	$(CXX) -c $(CXXFLAGS) $(CPPFLAGS) $(DEPFLAGS) -o $@ $<
 	@$(POSTCOMPILE)
 
 $(OPATH)%.o:: $(TPATH)%.c $(DPATH)%.d | $(OPATH) $(DPATH)
@@ -86,7 +100,7 @@ $(OPATH)%.o:: $(TPATH)%.c $(DPATH)%.d | $(OPATH) $(DPATH)
 $(OPATH)%.o:: $(UPATH)%.c $(UPATH)%.h | $(OPATH)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
-$(OPATH)cJSON.o:: $(JPATH)cJSON.c $(JPATH)cJSON.h | $(OPATH)
+$(OPATH)cJSON.o: $(JPATH)cJSON.c $(JPATH)cJSON.h | $(OPATH)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 test: $(BUILD_PATHS) $(RESULTS)
