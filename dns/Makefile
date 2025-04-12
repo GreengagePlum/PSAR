@@ -14,7 +14,8 @@ OPATH = $(BPATH)obj/
 DPATH = $(BPATH)dep/
 RPATH = $(BPATH)results/
 TPATH = test/
-UPATH = unity/src/
+GTPTH = googletest/googletest/
+GMPTH = googletest/googlemock/
 JPATH = cJSON/
 
 BUILD_PATHS = $(BPATH) $(DPATH) $(OPATH) $(RPATH)
@@ -24,8 +25,8 @@ EXEC = microDNS
 
 ##### Options
 CPPFLAGS =
-CFLAGS = -Wall -Wextra -Werror -std=iso9899:2018 -pedantic -I$(HPATH) -I$(JPATH) -I$(UPATH)
-CXXFLAGS = -Wall -Wextra -Werror -std=c++20 -pedantic -I$(HPATH) -I$(JPATH) -I$(UPATH)
+CFLAGS = -pipe -Wall -Wextra -Werror -std=iso9899:2018 -pedantic -I$(HPATH) -I$(JPATH)
+CXXFLAGS = -pipe -Wall -Wextra -Werror -std=c++20 -pedantic -I$(HPATH) -I$(JPATH) -I$(GTPTH)include/ -I$(GMPTH)include/ -I$(GTPTH) -I$(GMPTH)
 LDFLAGS =
 LDLIBS =
 DEPFLAGS = -MT $@ -MMD -MP -MF $(DPATH)$*.Td
@@ -46,16 +47,11 @@ endif
 SRC = $(wildcard $(SPATH)*.cpp)
 HDR = $(wildcard $(HPATH)*.hpp)
 OBJ = $(addprefix $(OPATH), $(patsubst %.cpp,%.o, $(notdir $(SRC))))
-DEP = $(addprefix $(DPATH), $(patsubst %.cpp,%.d, $(notdir $(SRC)))) $(addprefix $(DPATH), $(patsubst %.c,%.d, $(notdir $(SRCT))))
-SRCT = $(wildcard $(TPATH)*.c)
+SRCT = $(wildcard $(TPATH)*.cpp)
+DEP = $(addprefix $(DPATH), $(patsubst %.cpp,%.d, $(notdir $(SRC)))) $(addprefix $(DPATH), $(patsubst %.cpp,%.d, $(notdir $(SRCT))))
 
 ##### Tests
-RESULTS = $(patsubst $(TPATH)Test%.c,$(RPATH)Test%.txt,$(SRCT) )
-
-PASSED = `grep -s PASS $(RPATH)*.txt`
-FAIL = `grep -s FAIL $(RPATH)*.txt`
-IGNORE = `grep -s IGNORE $(RPATH)*.txt`
-
+RESULTS = $(patsubst $(TPATH)Test%.cpp,$(RPATH)Test%.txt,$(SRCT) )
 EXIT_STAT_TMP_FILE = $(RPATH)test_exit_stat.tmp
 
 ##### Documentation generation
@@ -68,7 +64,7 @@ DOCPATH = doc/public/
 POSTCOMPILE = mv -f $(DPATH)$*.Td $(DPATH)$*.d && touch $@
 
 ##### Build rules
-.PHONY: help all test doc clean cleandoc cleanall FORCE
+.PHONY: help all test doc clean cleandoc cleanall
 
 help:
 	@echo ""
@@ -93,31 +89,29 @@ $(OPATH)%.o:: $(SPATH)%.cpp $(DPATH)%.d | $(OPATH) $(DPATH)
 	$(CXX) -c $(CXXFLAGS) $(CPPFLAGS) $(DEPFLAGS) -o $@ $<
 	@$(POSTCOMPILE)
 
-$(OPATH)%.o:: $(TPATH)%.c $(DPATH)%.d | $(OPATH) $(DPATH)
-	$(CC) -c $(CFLAGS) $(CPPFLAGS) $(DEPFLAGS) -o $@ $<
+$(OPATH)%.o:: $(TPATH)%.cpp $(DPATH)%.d | $(OPATH) $(DPATH)
+	$(CXX) -c $(CXXFLAGS) $(CPPFLAGS) $(DEPFLAGS) -o $@ $<
 	@$(POSTCOMPILE)
 
-$(OPATH)%.o:: $(UPATH)%.c $(UPATH)%.h | $(OPATH)
-	$(CC) -c $(CFLAGS) -o $@ $<
+$(OPATH)%.o:: $(GTPTH)src/%.cc | $(OPATH)
+	$(CXX) -c $(CXXFLAGS) -o $@ $<
+
+$(OPATH)%.o:: $(GMPTH)src/%.cc | $(OPATH)
+	$(CXX) -c $(CXXFLAGS) -o $@ $<
 
 $(OPATH)cJSON.o: $(JPATH)cJSON.c $(JPATH)cJSON.h | $(OPATH)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 test: $(BUILD_PATHS) $(RESULTS)
-	@echo "-----------------------\nIGNORES:\n-----------------------"
-	@echo "$(IGNORE)"
-	@echo "-----------------------\nFAILURES:\n-----------------------"
-	@echo "$(FAIL)"
-	@echo "-----------------------\nPASSED:\n-----------------------"
-	@echo "$(PASSED)"
-	@echo "\nDONE"
 	@[ -s $(EXIT_STAT_TMP_FILE) ] && VAL=$$(cat $(EXIT_STAT_TMP_FILE)) || VAL=0; rm -f $(EXIT_STAT_TMP_FILE); exit $$VAL
 
-$(RPATH)%.txt: $(BPATH)% FORCE
-	-./$< > $@ 2>&1 || echo $$? > $(EXIT_STAT_TMP_FILE)
+$(RPATH)%.txt: $(BPATH)%
+	@echo "-----------------------\nRUNNING [$<]:\n"
+	@./$< || echo $$? > $(EXIT_STAT_TMP_FILE)
+	@echo "-----------------------"
 
-$(BPATH)Test%: $(OPATH)Test%.o $(OPATH)%.o $(OPATH)unity.o $(OPATH)cJSON.o
-	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+$(BPATH)Test%: $(OPATH)Test%.o $(OPATH)%.o $(OPATH)gtest-all.o $(OPATH)gtest_main.o $(OPATH)cJSON.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(OPATH):
 	mkdir -p $@
@@ -130,8 +124,6 @@ $(RPATH):
 
 $(BPATH):
 	mkdir -p $@
-
-FORCE:
 
 $(DEP):
 
