@@ -64,7 +64,7 @@ DOCPATH = doc/public/
 POSTCOMPILE = mv -f $(DPATH)$*.Td $(DPATH)$*.d && touch $@
 
 ##### Build rules
-.PHONY: help all test doc clean cleandoc cleanall
+.PHONY: help all test $(EXEC) doc clean cleandoc cleanall
 
 help:
 	@echo ""
@@ -79,11 +79,16 @@ help:
 	@echo " 		cleandoc	remove generated documentation artifacts"
 	@echo " 		cleanall	remove all generated files, start anew"
 	@echo ""
-
-$(EXEC): $(OBJ) $(OPATH)cJSON.o
-	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+	@echo "=> Built binaries and more are under $(BPATH)"
+	@echo "=> Generated documentation is under $(DOCPATH)"
+	@echo ""
 
 all: $(EXEC) test
+
+$(EXEC): $(BPATH)$(EXEC)
+
+$(BPATH)$(EXEC): $(OBJ) $(OPATH)cJSON.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(OPATH)%.o:: $(SPATH)%.cpp $(DPATH)%.d | $(OPATH) $(DPATH)
 	$(CXX) -c $(CXXFLAGS) $(CPPFLAGS) $(DEPFLAGS) -o $@ $<
@@ -130,7 +135,7 @@ $(DEP):
 -include $(DEP)
 
 clean:
-	rm -f $(EXEC) $(OBJ) $(DEP) $(RESULTS) $(EXIT_STAT_TMP_FILE)
+	rm -f $(BPATH)$(EXEC) $(OBJ) $(DEP) $(RESULTS) $(EXIT_STAT_TMP_FILE)
 
 cleandoc:
 	rm -rf $(DOCPATH)
