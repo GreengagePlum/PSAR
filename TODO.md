@@ -14,7 +14,8 @@
 
 ## Miscellaneous
 
-- [ ]
+- [ ] Rename `dns` folder to `microDNS`
+  - [ ] Move Git submodules to another path
 
 ## Done
 
