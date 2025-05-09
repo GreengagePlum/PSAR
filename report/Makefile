@@ -5,7 +5,7 @@ all: rapport
 rapport: rapport.pdf
 
 rapport.pdf: rapport.tex
-	latexmk -pdf rapport.tex
+	latexmk -pdfxe rapport.tex
 
 clean:
 	rm -f rapport.pdf

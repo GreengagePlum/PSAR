@@ -1,11 +1,13 @@
 \RequirePackage[l2tabu, orthodox]{nag}
 \documentclass[12pt]{article}
 \usepackage[T1]{fontenc}
+\usepackage{fontspec}
+% \setmainfont{Latin Modern Roman}
 \usepackage[utf8]{inputenc}
 \usepackage[french]{babel}
 \usepackage{amsthm,amssymb,amsmath,xcolor}
 \usepackage{setspace}
-\doublespacing
+% \doublespacing
 \usepackage{geometry}
 \geometry{
     a4paper,
@@ -21,6 +23,20 @@
     linkcolor=blue,
     filecolor=magenta,
     urlcolor=cyan,
+    pdftitle={Rapport PSAR ``Orchestration de micro-vm via un resolver DNS''},
+    pdfauthor={Efe ERKEN},
+    pdfencoding=auto, % Helps with unicode in bookmarks/metadata
+    unicode=true % Enable unicode support
+}
+\usepackage{listings} % Ajout pour les blocs de code
+% Fix quotes: Use csquotes package
+\usepackage[autostyle=true, style=french]{csquotes} % Recommended for quotes in french
+\MakeOuterQuote{"}
+
+\lstset{ % Configuration globale pour listings
+    basicstyle=\footnotesize\ttfamily,
+    breaklines=true,
+    postbreak=\mbox{\textcolor{red}{$\hookrightarrow$}\space},
 }
 
 \author{Efe ERKEN}
@@ -30,16 +46,33 @@
 \begin{document}
 \maketitle
 
-\section{Difficultés}
-\begin{center}
-	\includegraphics[scale=0.2]{placeholder.png}
-\end{center}
+\begin{abstract}
+    À faire...
+\end{abstract}
+
+\section{Objectifs du projet}
+    À faire...
+
+\section{Choix de conception}
+    À faire...
 
 \section{Choix d'implémentation}
-Tout d'abord, petit avertissement. J'ai fait le choix d'utiliser
-\href{https://dbeaver.io/}{\texttt{DBeaver}} comme client SQL et environnement
-de dévéloppement pour la première partie du projet. [...] en incluant le charactère
-``\texttt{/}'' aux bons endroits... \\
+    À faire...
+
+\section{Difficultés}
+    À faire...
+
+\section{Fonctionnalités complétées}
+    À faire...
+
+\section{Fonctionnalités incomplètes}
+    À faire...
+
+\section{Lacunes et améliorations possibles}
+    À faire...
+
+\section{Usage}
+    À faire...
 
 \end{document}
 
