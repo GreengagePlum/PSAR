@@ -1,7 +1,13 @@
-#include "config.hpp"
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
 #include <fstream>
+#include <iostream>
 #include <iterator>
+#include <regex>
 #include <utility>
+
+#include "config.hpp"
 
 namespace microdns
 {
@@ -29,6 +35,36 @@ ConfigLoader::ConfigLoader(const std::string &path) : path(path)
 
         params.emplace(std::make_pair(std::move(key), std::move(value)));
     }
+
+    loadNameservers();
+}
+
+void ConfigLoader::loadNameservers()
+{
+    auto &resolv = getParam("BACKUP_FILE_RESOLV");
+
+    std::ifstream ifs(resolv);
+    for (std::string s; std::getline(ifs, s);)
+    {
+        std::smatch ipMatch;
+        // Move on if malformed line (no nameserver line with IP found)
+        if (!std::regex_match(s, ipMatch, ipMatcher))
+            continue;
+
+        struct in_addr ip;
+        if (inet_pton(AF_INET, ipMatch[1].str().c_str(), &ip) == 0)
+        {
+            std::cerr << "ConfigLoader invalid IPv4 address read from resolv.conf, ignoring..." << std::endl;
+            continue;
+        }
+
+        nameservers.emplace_back(std::move(ip));
+    }
+}
+
+const decltype(ConfigLoader::nameservers) &ConfigLoader::getNameservers() const
+{
+    return nameservers;
 }
 
 // may throw std::out_of_range

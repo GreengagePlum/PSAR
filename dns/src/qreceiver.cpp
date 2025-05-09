@@ -8,35 +8,52 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cstring>
 #include <exception>
 #include <iostream>
+#include <memory>
+#include <regex>
 #include <string>
+#include <utility>
 
+#include "dns.hpp"
 #include "message.hpp"
 #include "qreceiver.hpp"
 
 namespace microdns
 {
 
-QueryReceiver::QueryReceiver(const ConfigLoader &cl, MessageQueue &mq) : buf(), mq(mq), cl(cl)
+bool QueryReceiver::closeSockets()
 {
-    isGood = false;
+    int ret = 0;
+    if (socketUDP != -1 && (ret |= close(socketUDP)) == -1)
+        perror("QueryReceiver UDP socket close failed");
+    if (socketTCP != -1 && (ret |= close(socketTCP)) == -1)
+        perror("QueryReceiver TCP socket close failed");
+    socketUDP = socketTCP = -1;
+    return ret == 0;
+}
 
-    // Fetch config parameters
-    try
-    {
-        ip = &cl.getParam("LOCAL_DNS_IP");
-        port = std::stoul(cl.getParam("LOCAL_DNS_PORT"));
-    }
-    catch (const std::exception &e)
-    {
-        // TODO: Log better
-        std::cerr << e.what() << std::endl;
-        return;
-    }
+/**
+ * This constructor does a few necessary things:
+ *
+ * - Fetch parameters from config
+ * - Configure domain matching regex by escaping domain string into a regex itself first
+ * - Create and bind downstream sockets
+ *
+ */
+QueryReceiver::QueryReceiver(const ConfigLoader &cl, MessageQueue &forwardQueue, MessageQueue &managedQueue,
+                             MessageQueue &responseQueue)
+    : ip(&cl.getParam("LOCAL_DNS_IP")), port(std::stoul(cl.getParam("LOCAL_DNS_PORT"))),
+      domain(&cl.getParam("BASE_DOMAIN")),
+      domainMatcher("\\." + std::regex_replace(*domain, specialChars, R"(\$&)") + "$"), buf(),
+      forwardQueue(forwardQueue), managedQueue(managedQueue), responseQueue(responseQueue), cl(cl), isGood(false),
+      isStarted(false), shouldStop(false)
+{
+    struct sockaddr_in *sin;
 
-    // Create sockets,
+    // Create sockets
     if ((socketUDP = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
     {
         perror("QueryReceiver UDP socket creation failed");
@@ -45,21 +62,19 @@ QueryReceiver::QueryReceiver(const ConfigLoader &cl, MessageQueue &mq) : buf(), 
     if ((socketTCP = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1)
     {
         perror("QueryReceiver TCP socket creation failed");
-        if (close(socketUDP) == -1)
-            perror("QueryReceiver UDP socket close failed");
-        return;
+        goto sock_fail;
     }
 
     // Just to ease casting later
-    struct sockaddr_in *sin = (struct sockaddr_in *)&ss;
+    sin = (struct sockaddr_in *)&ss;
 
-    // Initialize addr struct (shared between two sockets)
+    // Initialize addr struct (shared between the two sockets)
     memset(&ss, 0, sizeof(ss));
     ss.ss_family = AF_INET;
-    if (inet_pton(AF_INET, ip->c_str(), &sin->sin_addr.s_addr) == 0)
+    if (inet_pton(AF_INET, ip->c_str(), &sin->sin_addr) == 0)
     {
         std::cerr << "Invalid IP address" << std::endl;
-        return;
+        goto sock_fail;
     }
     sin->sin_port = htons(port);
 
@@ -82,66 +97,107 @@ QueryReceiver::QueryReceiver(const ConfigLoader &cl, MessageQueue &mq) : buf(), 
         goto sock_fail;
     }
 
+    queryMap.reserve(2 << (sizeof(queryIDPool) * 8));
     isGood = true;
     return;
 
 sock_fail:
-    if (close(socketUDP) == -1)
-        perror("QueryReceiver UDP socket close failed");
-    if (close(socketTCP) == -1)
-        perror("QueryReceiver TCP socket close failed");
+    closeSockets();
 }
 
-bool QueryReceiver::good()
+bool QueryReceiver::good() const
 {
     return isGood;
 }
 
-bool QueryReceiver::fail()
+bool QueryReceiver::fail() const
 {
     return !isGood;
 }
 
-void QueryReceiver::start()
+bool QueryReceiver::started() const
 {
-    struct pollfd pfd[2];
+    return isStarted;
+}
+
+bool QueryReceiver::start()
+{
+    if (isStarted)
+        return false;
+    if (!isGood)
+        return false;
+
+    shouldStop = false;
+    threadFinishedInit = false;
+    processor = std::thread(&QueryReceiver::processLoop, this);
+    // TODO: Maybe reinforce the wait condition since an error in thread creation might cause this context to block
+    // forever. Assuming this doesn't happen for now...
+    threadFinishedInit.wait(false);
+    return isStarted;
+}
+
+void QueryReceiver::processLoop()
+{
+    constexpr nfds_t POLLSIZE = 5;
+    struct pollfd pfd[POLLSIZE];
     pfd[0].fd = socketUDP;
-    pfd[0].events = POLLIN;
+    pfd[0].events = POLLIN | POLLOUT;
     pfd[1].fd = socketTCP;
     pfd[1].events = POLLIN;
+    pfd[2].fd = forwardQueue.getWritefd();
+    pfd[2].events = POLLOUT;
+    pfd[3].fd = managedQueue.getWritefd();
+    pfd[3].events = POLLOUT;
+    pfd[4].fd = responseQueue.getReadfd();
+    pfd[4].events = POLLIN;
 
-    int p;
-    dns::Message m;
-    int i = 0;
-    while ((p = poll(pfd, 2, -1)) > 0)
+    int timeout = 0; // Makes `poll` return immediately
+    bool alreadyNotified = false;
+
+    int pollret;
+    // 0 means timeout reached without any events (only the first time here)
+    while (!shouldStop.load(std::memory_order_relaxed) && (pollret = poll(pfd, POLLSIZE, timeout)) >= 0)
     {
-        // UDP
-        if (pfd[0].revents & POLLIN)
+        // Notify original thread on our well-being
+        if (!alreadyNotified)
         {
-            struct sockaddr_storage ss2;
-            memset(&ss2, 0, sizeof(ss2));
-            socklen_t slen = sizeof(ss2);
-            ssize_t ret = recvfrom(socketUDP, buf, sizeof(buf), 0, (struct sockaddr *)&ss2, &slen);
-            if (ret == -1)
-            {
-                std::cerr << "recvfrom error" << std::endl;
-                break;
-            }
-            if ((unsigned long)ret >= sizeof(buf))
-            {
-                std::cerr << "big packet skipped" << std::endl;
-                continue;
-            }
-            m.decode(buf, ret);
-            std::cout << "[" << i++ << "]" << m.asString();
-            m.setQr(1);
-            m.setRCode(3);
-            unsigned size;
-            m.encode(buf, sizeof(buf), size);
-            sendto(socketUDP, buf, size, 0, (struct sockaddr *)&ss2, slen);
+            alreadyNotified = true;
+            // timeout = -1; // Makes `poll` block indefinitely if no events on file descriptors
+            timeout = pollTimeout; // Makes `poll` block for a maximum of 200 milliseconds
+            isStarted = true;
+            isGood = true;
+            threadFinishedInit = true;
+            threadFinishedInit.notify_one();
         }
 
-        // TCP
+        // UDP, incoming
+        if (pfd[0].revents & POLLIN && pfd[2].revents & POLLOUT && pfd[3].revents & POLLOUT)
+        {
+            if (!handleIncomingUDP())
+            {
+                std::cerr << "QueryReceiver failed incoming message handling from UDP socket" << std::endl;
+                goto error;
+            }
+        }
+
+        // UDP, outgoing
+        if (pfd[4].revents & POLLIN && pfd[0].revents & POLLOUT)
+        {
+            if (!handleOutgoingUDP())
+            {
+                std::cerr << "QueryReceiver failed outgoing message handling from UDP socket" << std::endl;
+                goto error;
+            }
+        }
+
+        // UDP, error
+        if (pfd[0].revents & POLLERR)
+        {
+            std::cerr << "QueryReceiver poll returned error for UDP socket" << std::endl;
+            goto error;
+        }
+
+        // TODO: TCP, incoming, ignoring for now
         if (pfd[1].revents & POLLIN)
         {
             // accept() call should be here...
@@ -151,25 +207,142 @@ void QueryReceiver::start()
         }
     }
 
-    // 0 means timeout reached without anything
-    // -1 means eithor error or signal
-    if (p == -1)
+    // -1 means eithor error or signal interrupt
+    if (pollret == -1)
+        perror("QueryReceiver poll failed or interrupted");
+    else // means exiting gracefully due to `shouldStop` flag from `stop()` request
+        goto usual;
+
+error:
+    closeSockets();
+    isGood = false;
+
+usual:
+    isStarted = false;
+    // Notify original thread if not already
+    if (!alreadyNotified)
     {
-        perror("QueryReceiver poll failed");
-        if (close(socketUDP) == -1)
-            perror("QueryReceiver UDP socket close failed");
-        if (close(socketTCP) == -1)
-            perror("QueryReceiver TCP socket close failed");
-        isGood = false;
+        threadFinishedInit = true;
+        threadFinishedInit.notify_one();
     }
+}
+
+bool QueryReceiver::handleIncomingUDP()
+{
+    struct sockaddr_storage ssret;
+    memset(&ssret, 0, sizeof(ssret));
+    socklen_t slenret = sizeof(ssret);
+
+    ssize_t ret = recvfrom(socketUDP, buf, sizeof(buf), MSG_TRUNC, (struct sockaddr *)&ssret, &slenret);
+    if (ret == -1)
+    {
+        std::cerr << "QueryReceiver recvfrom error" << std::endl;
+        return false;
+    }
+    if ((unsigned long)ret > sizeof(buf))
+    {
+        std::cerr << "QueryReceiver big UDP packet skipped" << std::endl;
+        return true;
+    }
+
+    auto m = std::make_shared<dns::Message>();
+    try
+    {
+        m->decode(buf, ret);
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "" << e.what() << std::endl;
+        return true;
+    }
+
+    const auto &queries = m->getQueries();
+    if (queries.empty())
+        return true;
+
+    // Insert into a map with a local unique ID to keep track of the query response to be delivered back later
+    auto retAddr = std::make_shared<QueryReceiver::ReturnAddressDetails>();
+    memcpy(&retAddr->ss, &ssret, sizeof(ssret));
+    memcpy(&retAddr->slen, &slenret, sizeof(slenret));
+    queryMap.insert(std::make_pair(++queryIDPool, retAddr));
+    auto queryEntry = std::make_pair(queryIDPool, m);
+
+    /* TODO: Maybe iterate over the queries in a more sophisticated way (possibility of multiple query entries
+     * with ours mixed up in there)
+     *
+     * For now, assuming only one query record per query and that our domain is present in the first
+     * query record of a query
+     * */
+
+    /* Check multiple things about the query records inside the query:
+     *
+     * if class = IN (for Internet) and type = 1 (A record for IPv4)
+     * if query domain concerns us (mathes with the domain from the config)
+     *
+     * otherwise put query in the forward queue (not our concern)
+     */
+    if (queries[0]->getClass() == dns::eQClass::QCLASS_IN && queries[0]->getType() == 1 &&
+        std::regex_search(queries[0]->getName(), domainMatcher))
+    {
+        std::cerr << "Pushing to managedQueue: " << m->asString() << std::endl;
+        managedQueue.push(queryEntry);
+    }
+    else
+    {
+        std::cerr << "Pushing to forwardQueue: " << m->asString() << std::endl;
+        forwardQueue.push(queryEntry);
+    }
+    return true;
+}
+
+bool QueryReceiver::handleOutgoingUDP()
+{
+    auto queryEntry = responseQueue.pop();
+    auto retAddr = queryMap.at(queryEntry.first);
+    if (queryMap.erase(queryEntry.first) != 1)
+    {
+        std::cerr << "QueryReceiver queryMap erase error" << std::endl;
+        return false;
+    }
+
+    dns::uint encodedSize;
+    try
+    {
+        queryEntry.second->encode(buf, sizeof(buf), encodedSize);
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "" << e.what() << std::endl;
+        return true;
+    }
+
+    if (sendto(socketUDP, buf, encodedSize, 0, (struct sockaddr *)&retAddr->ss, retAddr->slen) != encodedSize)
+    {
+        perror("QueryReceiver UDP sendto error");
+        return false;
+    }
+
+    return true;
+}
+
+bool QueryReceiver::stop()
+{
+    if (!isStarted)
+        return false;
+    shouldStop.store(true, std::memory_order_relaxed);
+    processor.join();
+    isStarted = false;
+    return true;
 }
 
 QueryReceiver::~QueryReceiver()
 {
-    if (close(socketUDP) == -1)
-        perror("QueryReceiver UDP socket close failed");
-    if (close(socketTCP) == -1)
-        perror("QueryReceiver TCP socket close failed");
+    closeSockets();
+}
+
+const ConfigLoader &QueryReceiver::getConfig() const
+{
+    return cl;
 }
 
 } // namespace microdns
