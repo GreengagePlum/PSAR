@@ -32,11 +32,6 @@ int MessageQueue::getReadfd() const
     return pipefd[0];
 }
 
-int MessageQueue::getWritefd() const
-{
-    return pipefd[1];
-}
-
 MessageQueue::QueryEntry MessageQueue::pop()
 {
     std::unique_lock<std::mutex> lk(mtx);
@@ -62,7 +57,7 @@ void MessageQueue::push(MessageQueue::QueryEntry queryEntry)
 
     // TODO: error check this write!
     write(pipefd[1], &notification, sizeof(notification));
-    readReady.notify_one();
+    readReady.notify_one(); // TODO: optimize away unnecessary notifications (only if someone is actually waiting)
 }
 
 std::optional<MessageQueue::QueryEntry> MessageQueue::try_pop(const std::chrono::milliseconds &timeout)
@@ -79,7 +74,7 @@ std::optional<MessageQueue::QueryEntry> MessageQueue::try_pop(const std::chrono:
     // TODO: error check this read!
     read(pipefd[0], &notification, sizeof(notification));
     if (limit >= 0)
-        writeReady.notify_one();
+        writeReady.notify_one(); // TODO: optimize away unnecessary notifications (only if someone is actually waiting)
     return queryEntry;
 }
 

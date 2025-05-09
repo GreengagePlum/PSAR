@@ -138,18 +138,14 @@ bool QueryReceiver::start()
 
 void QueryReceiver::processLoop()
 {
-    constexpr nfds_t POLLSIZE = 5;
+    constexpr nfds_t POLLSIZE = 3;
     struct pollfd pfd[POLLSIZE];
     pfd[0].fd = socketUDP;
-    pfd[0].events = POLLIN | POLLOUT;
+    pfd[0].events = POLLIN;
     pfd[1].fd = socketTCP;
     pfd[1].events = POLLIN;
-    pfd[2].fd = forwardQueue.getWritefd();
-    pfd[2].events = POLLOUT;
-    pfd[3].fd = managedQueue.getWritefd();
-    pfd[3].events = POLLOUT;
-    pfd[4].fd = responseQueue.getReadfd();
-    pfd[4].events = POLLIN;
+    pfd[2].fd = responseQueue.getReadfd();
+    pfd[2].events = POLLIN;
 
     int timeout = 0; // Makes `poll` return immediately
     bool alreadyNotified = false;
@@ -171,7 +167,7 @@ void QueryReceiver::processLoop()
         }
 
         // UDP, incoming
-        if (pfd[0].revents & POLLIN && pfd[2].revents & POLLOUT && pfd[3].revents & POLLOUT)
+        if (pfd[0].revents & POLLIN)
         {
             if (!handleIncomingUDP())
             {
@@ -181,7 +177,7 @@ void QueryReceiver::processLoop()
         }
 
         // UDP, outgoing
-        if (pfd[4].revents & POLLIN && pfd[0].revents & POLLOUT)
+        if (pfd[2].revents & POLLIN)
         {
             if (!handleOutgoingUDP())
             {

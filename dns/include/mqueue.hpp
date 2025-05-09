@@ -24,7 +24,7 @@ class MessageQueue
     const int limit;
 
     int pipefd[2]; // For `poll()` integration, notification mechanism
-    char notification;
+    char notification = 0;
 
   public:
     explicit MessageQueue(int limit = -1);
@@ -38,8 +38,6 @@ class MessageQueue
     std::optional<QueryEntry> try_pop(const std::chrono::milliseconds &timeout);
 
     int getReadfd() const;
-
-    int getWritefd() const;
 };
 
 } // namespace microdns

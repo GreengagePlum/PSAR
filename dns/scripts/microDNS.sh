@@ -35,13 +35,15 @@ if [ "$#" -ne 1 ]; then
 fi
 
 setup_all() {
-    ./subtasks/resolv_init.sh
-    ./subtasks/nss_init.sh
+    setup_run_resolv
+    setup_resolv
+    setup_nss
 }
 
 teardown_all() {
-    ./subtasks/nss_destroy.sh
-    ./subtasks/resolv_destroy.sh
+    teardown_nss
+    teardown_resolv
+    teardown_run_resolv
 }
 
 setup_resolv() {
@@ -58,6 +60,14 @@ setup_nss() {
 
 teardown_nss() {
     ./subtasks/nss_destroy.sh
+}
+
+setup_run_resolv() {
+    ./subtasks/run_resolv_init.sh
+}
+
+teardown_run_resolv() {
+    ./subtasks/run_resolv_destroy.sh
 }
 
 case "$1" in
@@ -78,6 +88,12 @@ setup-nss)
     ;;
 teardown-nss)
     teardown_nss
+    ;;
+setup-run-resolv)
+    setup_run_resolv
+    ;;
+teardown-run-resolv)
+    teardown_run_resolv
     ;;
 *)
     print_usage

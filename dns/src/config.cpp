@@ -41,7 +41,7 @@ ConfigLoader::ConfigLoader(const std::string &path) : path(path)
 
 void ConfigLoader::loadNameservers()
 {
-    auto &resolv = getParam("BACKUP_FILE_RESOLV");
+    auto &resolv = getParam("BACKUP_FILE_RUN");
 
     std::ifstream ifs(resolv);
     for (std::string s; std::getline(ifs, s);)

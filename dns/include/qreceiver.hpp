@@ -43,7 +43,7 @@ class QueryReceiver
     std::atomic_bool shouldStop;
     std::atomic_bool threadFinishedInit;
 
-    QueryID queryIDPool; // Local IDs to avoid DNS transaction ID collisions
+    QueryID queryIDPool = 0; // Local IDs to avoid DNS transaction ID collisions
     typedef struct
     {
         struct sockaddr_storage ss;
