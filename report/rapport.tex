@@ -47,32 +47,152 @@
 \maketitle
 
 \begin{abstract}
-    À faire...
+Le présent projet s'inscrit dans le contexte de l'informatique serverless et explore une approche novatrice pour l'orchestration de micro-machines virtuelles (microVMs) Firecracker[cite: 46]. L'objectif principal était de développer un mécanisme permettant le lancement automatisé et le placement optimisé de ces microVMs en s'appuyant sur l'infrastructure DNS[cite: 50]. Plus spécifiquement, il s'agissait d'étendre ou de simuler les fonctionnalités d'un proxy DNS tel que dnscrypt-proxy pour intercepter les requêtes DNS et, en fonction de celles-ci, gérer dynamiquement le cycle de vie des microVMs[cite: 53, 54]. Ce rapport détaille la conception envisagée, les travaux d'implémentation réalisés, notamment sur la composante DNS, ainsi que les aspects liés à l'orchestration Firecracker qui, bien que conçus, n'ont pu être intégralement mis en œuvre faute de temps. Nous discuterons des choix techniques, des fonctionnalités complétées et de celles restées à l'état de concept, tout en esquissant les perspectives d'amélioration et les travaux futurs possibles.
 \end{abstract}
 
 \section{Objectifs du projet}
-    À faire...
+L'ambition centrale de ce projet était de rendre la gestion des microVMs Firecracker aussi transparente que possible pour l'utilisateur et les applications[cite: 51]. Conformément au sujet du projet[cite: 41], les objectifs spécifiques étaient les suivants:
+\begin{itemize}
+    \item \textbf{Automatisation du lancement des microVMs} : Utiliser les requêtes DNS comme déclencheurs pour démarrer à la volée les microVMs nécessaires à l'exécution d'une fonction ou d'un service[cite: 50].
+    \item \textbf{Transparence et localité} : Masquer la complexité de la gestion dynamique des microVMs et favoriser naturellement le placement des microVMs d'une même chaîne de traitement sur des serveurs proches ou identiques[cite: 51].
+    \item \textbf{Intégration avec un proxy DNS} : Le projet initial suggérait de développer un patch pour dnscrypt-proxy[cite: 53]. L'idée était d'intercepter les requêtes DNS au sein de ce proxy pour y intégrer la logique d'orchestration[cite: 54].
+    \item \textbf{Gestion du cycle de vie et adressage} : Résoudre la problématique de l'adressage a priori inexistant des microVMs [cite: 49] en leur assignant dynamiquement des adresses IP et en assurant la cohérence des résolutions DNS, notamment pour les fonctions s'appelant en chaîne[cite: 55].
+    \item \textbf{Réalisation d'un état de l'art} : Étudier les solutions existantes en matière d'orchestration de microVMs[cite: 56].
+    \item \textbf{Développement d'un serveur web initial} : Un petit serveur web était envisagé pour recevoir la requête HTTP initiale et potentiellement centraliser une partie de la logique de lancement dans une première approche[cite: 57].
+\end{itemize}
+Ces objectifs visaient à terme à fournir une solution flexible et performante pour les plateformes serverless basées sur Firecracker, en tirant parti de l'omniprésence du DNS.
 
 \section{Choix de conception}
-    À faire...
+Plusieurs choix de conception fondamentaux ont guidé l'approche de ce projet :
+
+\begin{itemize}
+    \item \textbf{Déclenchement par DNS} : L'idée centrale d'utiliser la résolution DNS comme mécanisme de déclenchement pour le lancement et le placement des microVMs est novatrice[cite: 50]. Elle promet une grande transparence pour les applications, qui n'ont pas besoin d'être modifiées pour bénéficier de cette orchestration dynamique. De plus, elle peut naturellement favoriser la localité des traitements[cite: 51].
+    \item \textbf{Firecracker comme VMM} : Le choix de Firecracker s'imposait par sa légèreté, sa rapidité de démarrage (quelques millisecondes) et ses fortes garanties d'isolation, le positionnant comme un candidat idéal pour remplacer les conteneurs dans les environnements serverless sécurisés[cite: 46, 47]. Le fichier `firecracker/vm_config.json` témoigne de la configuration de base envisagée pour ces microVMs.
+    \item \textbf{Proxy DNS extensible} : Bien que le sujet mentionne spécifiquement `dnscrypt-proxy`[cite: 53], la conception s'est orientée vers la création d'un composant DNS dédié (nommé `microDNS` en interne, comme visible dans le code source sous le répertoire `dns/`). Ce composant reprendrait l'idée d'interception et de traitement personnalisé des requêtes DNS. Cette approche permettait de se concentrer sur la logique métier spécifique au projet sans être contraint par l'architecture interne de `dnscrypt-proxy`, tout en gardant la possibilité d'une intégration future.
+    \item \textbf{Configuration externalisée} : Pour le module DNS, une approche de configuration par fichier (par exemple, `microDNS.conf` mentionné dans `dns/`) a été retenue pour permettre une flexibilité dans le déploiement et l'adaptation des paramètres du service.
+\end{itemize}
+
+Ces choix visaient à créer un système modulaire, potentiellement performant, et adapté aux contraintes du paradigme serverless.
 
 \section{Choix d'implémentation}
-    À faire...
+L'implémentation s'est concentrée en priorité sur le cœur du mécanisme DNS.
+
+\begin{itemize}
+    \item \textbf{Composant DNS personnalisé (`microDNS`)} : Un serveur/proxy DNS a été développé en C++. Le code source principal se trouve dans `dns/`. Il met en œuvre plusieurs classes clés :
+        \begin{itemize}
+            \item `ConfigLoader` : Pour charger la configuration à partir d'un fichier (par exemple, `./microDNS.conf`).
+            \item `MessageQueue` : Pour la communication asynchrone entre les différents modules du composant DNS.
+            \item `QueryReceiver` : Responsable de la réception des requêtes DNS entrantes.
+            \item `QueryForwarder` : Chargé de transmettre les requêtes DNS (soit à un résolveur externe, soit potentiellement au module d'orchestration interne).
+        \end{itemize}
+    Cette structure suggère une architecture modulaire et thread-safe pour le traitement des requêtes DNS. L'utilisation de `dns/include/dns.hpp` (qui semble s'inspirer d'une bibliothèque externe) fournit les définitions de base des structures et constantes du protocole DNS.
+    \item \textbf{Préparation pour Firecracker} : Bien que l'orchestration Firecracker n'ait pas été implémentée, une configuration type pour une microVM a été définie dans le fichier `git_PSAR/firecracker/vm_config.json`. Ce fichier spécifie les paramètres essentiels comme l'image du noyau (`vmlinux.bin`), les arguments de démarrage, la configuration du disque racine (`bionic.rootfs.ext4`), le nombre de vCPUs, la mémoire, et l'interface réseau. Cela constitue une première étape indispensable vers l'intégration de Firecracker.
+    \item \textbf{Langage et outils} : Le langage C++ a été choisi pour l'implémentation du composant DNS, probablement pour ses performances et ses capacités de bas niveau utiles à la manipulation des paquets réseau. Le projet fait également mention de l'utilisation de Make pour la compilation, comme indiqué dans `report/README.md` et suggéré par la structure des fichiers.
+\end{itemize}
+Les efforts se sont donc portés sur la mise en place d'une fondation solide pour la partie DNS, qui est cruciale pour le fonctionnement de l'ensemble du système envisagé.
 
 \section{Difficultés}
-    À faire...
+Le développement d'un tel projet comporte plusieurs défis inhérents, certains anticipés et d'autres rencontrés en cours de route :
+
+\begin{itemize}
+    \item \textbf{Complexité de l'orchestration des microVMs} : La gestion dynamique du cycle de vie des microVMs Firecracker, incluant leur création, configuration réseau, démarrage, surveillance et arrêt, est une tâche complexe. L'interaction avec l'API de Firecracker et la gestion de l'état des VMs demandent une ingénierie logicielle conséquente.
+    \item \textbf{Développement et intégration du proxy DNS} : Que ce soit en patchant `dnscrypt-proxy` ou en développant un proxy DNS personnalisé comme ce fut le cas ici (`microDNS`), la manipulation des paquets DNS, l'interprétation correcte des requêtes, la modification des réponses et la gestion des états (cache, etc.) sont des opérations délicates et sujettes à erreurs. Assurer la compatibilité et la robustesse de ce composant est un défi majeur.
+    \item \textbf{Algorithmes de placement optimisé} : Concevoir et implémenter des algorithmes de placement efficaces, qui tiennent compte de multiples métriques système en temps réel (charge CPU, usage mémoire, localité des données, contraintes NUMA [cite: 49]) pour minimiser la latence, représente une difficulté algorithmique et pratique notable.
+    \item \textbf{Contraintes de temps} : Comme explicitement mentionné par l'étudiant, le manque de temps a été un facteur limitant majeur, empêchant la réalisation complète de toutes les fonctionnalités envisagées, en particulier celles liées à l'orchestration Firecracker et au serveur web.
+    \item \textbf{Sécurité et isolation} : Bien que Firecracker offre une isolation forte[cite: 47], la surcouche d'orchestration doit être conçue avec soin pour ne pas introduire de nouvelles vulnérabilités, notamment dans la gestion des requêtes et la communication entre les composants.
+    \item \textbf{Latence de bout en bout} : Atteindre l'objectif de latence minimale pour le traitement des requêtes [cite: 49] est un défi constant, impliquant l'optimisation de chaque étape, depuis la réception de la requête DNS jusqu'à la disponibilité de la microVM.
+    \item \textbf{Mise en réseau des microVMs} : La configuration dynamique du réseau pour chaque microVM (par exemple, via des interfaces `tap` comme suggéré dans `firecracker/vm_config.json`) et leur intégration dans le réseau existant, tout en assurant leur adressabilité et leur communication, est techniquement complexe.
+\end{itemize}
+Ces difficultés soulignent l'ampleur du projet et expliquent en partie pourquoi certaines fonctionnalités sont restées au stade de la conception.
 
 \section{Fonctionnalités complétées}
-    À faire...
+Malgré les contraintes, une partie significative du projet, axée sur le composant DNS, a pu être menée à bien :
+
+\begin{itemize}
+    \item \textbf{Fondations du proxy/serveur DNS personnalisé (`microDNS`)} : Le cœur du système de traitement des requêtes DNS a été implémenté en C++. Cela inclut :
+        \begin{itemize}
+            \item La capacité de recevoir des requêtes DNS, comme le suggère la classe `QueryReceiver` dans `dns/src/main.cpp`.
+            \item Un mécanisme de transmission (forwarding) des requêtes DNS, géré par la classe `QueryForwarder`.
+            \item L'utilisation de files de messages (`MessageQueue`) pour une gestion asynchrone et découplée des tâches au sein du proxy.
+            \item Un système de chargement de configuration (`ConfigLoader`) permettant de paramétrer le comportement du proxy via un fichier externe (par exemple, `microDNS.conf`).
+        \end{itemize}
+    \item \textbf{Définition de la configuration des microVMs Firecracker} : Le fichier `git_PSAR/firecracker/vm_config.json` a été créé, spécifiant une configuration de base pour les microVMs. Cela démontre une préparation pour la partie orchestration, même si son implémentation n'a pas été finalisée.
+    \item \textbf{Structure générale du projet et outillage de base} : Le projet a été initialisé avec une structure de dossiers (par exemple, `dns`, `firecracker`, `report`) et les fichiers de base nécessaires. Le `CHANGELOG.md` indique une initialisation du dépôt Git le 2025-04-12.
+\end{itemize}
+Ces éléments constituent une base fonctionnelle pour la partie DNS, qui est la première étape essentielle vers la réalisation de l'objectif global du projet.
 
 \section{Fonctionnalités incomplètes}
-    À faire...
+En raison principalement des contraintes de temps, plusieurs fonctionnalités clés décrites dans le sujet du projet [cite: 41] n'ont pas pu être implémentées ou finalisées :
+
+\begin{itemize}
+    \item \textbf{Orchestration dynamique des microVMs Firecracker} : La fonctionnalité principale, à savoir le lancement, l'arrêt et la gestion active des microVMs Firecracker en réponse aux requêtes DNS interceptées, n'a pas été implémentée. Le lien entre le composant `microDNS` et un gestionnaire Firecracker reste à faire.
+    \item \textbf{Patch ou intégration poussée avec `dnscrypt-proxy`} : Le sujet initial suggérait un patch pour `dnscrypt-proxy`[cite: 58]. L'implémentation actuelle (`microDNS`) est un serveur autonome. L'intégration en tant que module ou patch de `dnscrypt-proxy` n'a pas été réalisée.
+    \item \textbf{Optimisation du placement des microVMs} : Les mécanismes d'optimisation du placement basés sur des métriques système ou l'utilisation de `cgroups` [cite: 58] sont restés à l'état de concept.
+    \item \textbf{Serveur web initial} : Le petit serveur web envisagé pour recevoir la requête HTTP initiale et potentiellement coordonner le lancement des microVMs dans un scénario centralisé [cite: 57] n'a pas été développé.
+    \item \textbf{Cache de cohérence DNS} : Le système de cache pour assurer qu'une fonction résolve toujours le nom de domaine de la fonction suivante vers la même adresse IP (pour garantir la stabilité des chaînes de fonctions) [cite: 55] n'a pas été implémenté dans le `microDNS` actuel.
+    \item \textbf{État de l'art exhaustif} : Bien que des recherches aient pu être menées, la formalisation d'un "petit état de l'art sur les orchestrateurs de micro-vm" [cite: 56] n'est pas explicitement présente dans les livrables actuels.
+    \item \textbf{Tests et validation approfondis} : Au-delà du développement initial, des phases de test complètes pour valider la robustesse, la performance et la sécurité du système n'ont pu être entreprises.
+\end{itemize}
+Ces fonctionnalités représentent les principaux axes de travail restants pour atteindre la vision complète du projet.
 
 \section{Lacunes et améliorations possibles}
-    À faire...
+Le travail réalisé constitue une première étape prometteuse. Pour mener le projet à son terme et l'améliorer, plusieurs pistes peuvent être envisagées :
+
+\begin{itemize}
+    \item \textbf{Finalisation de l'orchestration Firecracker} : C'est l'amélioration la plus critique. Il s'agirait de développer le module capable d'interagir avec l'API de Firecracker pour :
+        \begin{itemize}
+            \item Démarrer dynamiquement des microVMs en utilisant la configuration définie (par exemple, `firecracker/vm_config.json`).
+            \item Configurer leur réseau (interfaces `tap`, adresses IP).
+            \item Les arrêter lorsque nécessaire.
+            \item Gérer leur état.
+        \end{itemize}
+    \item \textbf{Implémentation de la logique de placement} : Développer les algorithmes d'optimisation du placement[cite: 49, 58], en intégrant la collecte de métriques système (charge CPU, mémoire disponible, etc.) et l'utilisation éventuelle des `cgroups` pour le contrôle des ressources.
+    \item \textbf{Intégration complète du flux DNS vers Firecracker} : Connecter le composant `microDNS` au module d'orchestration Firecracker. Lorsqu'une requête DNS spécifique est interceptée par `microDNS`, celui-ci devrait communiquer avec l'orchestrateur pour déclencher le lancement (ou la réutilisation) d'une microVM et retourner son adresse IP.
+    \item \textbf{Développement du serveur web et de la solution centralisée} : Mettre en place le serveur web mentionné dans le sujet [cite: 57] pour gérer les requêtes initiales et, si pertinent, une première version centralisée de l'orchestration.
+    \item \textbf{Mise en place du cache de résolution DNS} : Intégrer un mécanisme de cache au sein de `microDNS` pour garantir la cohérence des adresses IP retournées pour des services spécifiques, surtout dans des scénarios de chaînage de fonctions[cite: 55].
+    \item \textbf{Améliorations du composant `microDNS`} :
+        \begin{itemize}
+            \item Gestion plus fine des types d'enregistrements DNS.
+            \item Sécurisation (prévention des attaques DDoS, validation des requêtes).
+            \item Journalisation et monitoring détaillés.
+        \end{itemize}
+    \item \textbf{Interface de gestion et de configuration} : Prévoir une interface (CLI ou web) pour administrer le système, visualiser l'état des microVMs, et ajuster les politiques de placement.
+    \item \textbf{Tests et évaluation des performances} : Mener des campagnes de tests approfondies pour évaluer la latence, la scalabilité, la robustesse et la sécurité de la solution globale. Comparer avec d'autres approches d'orchestration.
+    \item \textbf{Documentation utilisateur et développeur} : Compléter la documentation pour faciliter l'utilisation, la maintenance et les contributions futures au projet. Le `README.md` actuel du projet semble concerner un autre sujet et devrait être mis à jour.
+\end{itemize}
+Ces améliorations permettraient de transformer le prototype actuel en une solution d'orchestration complète et performante.
 
 \section{Usage}
-    À faire...
+L'utilisation du système, dans sa version finalisée telle que conçue, se décomposerait en plusieurs étapes, bien que seule la partie DNS soit actuellement fonctionnelle.
+
+\textbf{Utilisation théorique (système complet)} :
+\begin{enumerate}
+    \item Un client (ou une fonction existante) effectue une requête DNS pour un nom de domaine spécifique, par exemple `ma-fonction.service.local`.
+    \item Cette requête est interceptée par le composant `microDNS` (agissant comme un résolveur DNS configuré pour le client ou le système).
+    \item `microDNS` identifie que ce domaine correspond à un service devant être hébergé sur une microVM Firecracker.
+    \item Il communique avec le module d'orchestration Firecracker.
+    \item L'orchestrateur, en fonction de ses politiques de placement et de la disponibilité des ressources :
+        \begin{itemize}
+            \item Démarre une nouvelle microVM Firecracker si aucune n'est disponible et configurée pour ce service.
+            \item Ou réutilise une microVM existante et inactive.
+        \end{itemize}
+    \item Une fois la microVM prête et son adresse IP connue, l'orchestrateur la transmet à `microDNS`.
+    \item `microDNS` répond à la requête DNS initiale du client avec l'adresse IP de la microVM hébergeant `ma-fonction.service.local`.
+    \item Le client peut alors communiquer directement avec la microVM.
+\end{enumerate}
+
+\textbf{Utilisation de la partie implémentée (`microDNS`)} :
+Actuellement, le composant `microDNS` peut être compilé et exécuté.
+\begin{enumerate}
+    \item \textbf{Compilation} : Le code source en C++ situé dans le dossier `dns/src/` doit être compilé. En se basant sur des conventions standard et la présence d'un fichier `compile_flags.txt`, un `Makefile` ou un système de build comme CMake serait typiquement utilisé, bien que les détails exacts de la compilation ne soient pas fournis dans le `README.md` principal (celui-ci étant potentiellement obsolète). Les dépendances comme les bibliothèques C++ standard et potentiellement des bibliothèques pour les threads (pthreads) seraient nécessaires.
+    \item \textbf{Configuration} : Avant de lancer `microDNS`, un fichier de configuration (par exemple, `microDNS.conf` dans le même répertoire que l'exécutable, comme lu par `dns/src/main.cpp`) doit être créé et paramétré. Ce fichier définirait probablement les adresses d'écoute, les transitaires DNS (forwarders), et d'autres paramètres de fonctionnement du proxy.
+    \item \textbf{Exécution} : Lancer l'exécutable compilé. Le `main.cpp` suggère qu'il se met en écoute des requêtes DNS et les traite ou les transfère. Il attend un signal (SIGINT, par exemple Ctrl+C) pour s'arrêter proprement.
+    \item \textbf{Test} : Pour tester, il faudrait configurer un client pour utiliser l'adresse et le port où `microDNS` écoute comme son serveur DNS, puis effectuer des résolutions de noms.
+\end{enumerate}
+Il est important de noter que sans la partie orchestration Firecracker, `microDNS` agira principalement comme un simple forwarder DNS ou un serveur DNS basique, en fonction de son implémentation exacte des modules `QueryReceiver` et `QueryForwarder`. Le fichier `dns/scripts/microDNS.sh` et les scripts dans `dns/scripts/subtasks/` suggèrent des mécanismes pour initialiser ou modifier la configuration de résolution DNS du système hôte pour utiliser `microDNS`.
+
+\nocite{*}
+\bibliographystyle{IEEEtran}
+\bibliography{references}
 
 \end{document}
-
