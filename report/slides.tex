@@ -1,0 +1,310 @@
+\documentclass[12pt]{beamer}
+\usetheme{Madrid} % Vous pouvez choisir un autre thème Beamer
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{graphicx}
+\usepackage{ragged2e} % For \RaggedRight
+
+% Titre, Auteur, etc.
+\title{Orchestration de Micro-VM Firecracker via un Résolveur DNS}
+\author{Efe ERKEN}
+\institute{Master Informatique - Parcours SAR \\ Sorbonne Université}
+\date{\today}
+
+% ----- Personnalisation du pied de page -----
+\setbeamertemplate{footline}{%
+	\leavevmode%
+	\hbox{%
+		\begin{beamercolorbox}[wd=.2\paperwidth,ht=2.25ex,dp=1ex,left]{author in head/foot}%
+			\usebeamerfont{author in head/foot}\hspace*{2ex}Efe ERKEN % Votre nom ici
+		\end{beamercolorbox}%
+		\begin{beamercolorbox}[wd=.6\paperwidth,ht=2.25ex,dp=1ex,center]{title in head/foot}%
+			\usebeamerfont{title in head/foot}\insertshorttitle % Utilise le titre court défini dans \title[]{}
+		\end{beamercolorbox}%
+		\begin{beamercolorbox}[wd=.2\paperwidth,ht=2.25ex,dp=1ex,right]{date in head/foot}%
+			\usebeamerfont{date in head/foot}\insertframenumber{} / \inserttotalframenumber\hspace*{2ex} % Numéro de page
+	\end{beamercolorbox}}%
+	\vskip0pt%
+}
+% ----- Fin de la personnalisation -----
+
+\begin{document}
+
+	% Page de titre
+	\begin{frame}
+		\titlepage
+	\end{frame}
+
+	% Table des matières (optionnel)
+	\begin{frame}
+	  \frametitle{Table des Matières}
+	  \tableofcontents
+	\end{frame}
+
+	% Introduction et Objectifs
+    \section{Introduction et Objectifs du Projet}
+	\begin{frame}
+		\frametitle{Introduction et Objectifs du Projet}
+		\begin{itemize}
+			\item \textbf{Objectif principal :} Gestion transparente de microVM Firecracker via DNS pour l'exécution sécurisée et isolée de fonctions utilisateurs.
+			\item \textbf{Fonctionnement envisagé :}
+			\begin{itemize}
+				\item Un proxy DNS intercepte les requêtes.
+				\item Si le domaine correspond à un service géré, une microVM est créée/allouée.
+				\item L'adresse IP de la microVM est retournée dans la réponse DNS.
+				\item L'utilisateur accède à la fonction via HTTP sur cette IP.
+			\end{itemize}
+			\item \textbf{Extensions futures (initialement prévues) :} Réutilisation des microVM, pool d'instances, chaînage de fonctions.
+		\end{itemize}
+	\end{frame}
+
+	% Architecture microDNS
+    \section{Architecture du Gestionnaire \texttt{microDNS}}
+	\begin{frame}
+		\frametitle{Architecture du Gestionnaire \texttt{microDNS}}
+		\begin{columns}[T] % Split frame into columns
+			\begin{column}{0.5\textwidth}
+				\RaggedRight % Justify text to the left
+				\textbf{Composants Clés :}
+				\begin{itemize}
+					\item \texttt{QueryReceiver (QR)} : Réceptionne et filtre les requêtes DNS.
+					\item \texttt{QueryForwarder (QF)} : Relaye les requêtes DNS non gérées vers des résolveurs externes.
+					\item \texttt{MicroVMManager (MVMM)} : (Prévu) Gère le cycle de vie des microVM.
+				\end{itemize}
+			\end{column}
+			\begin{column}{0.5\textwidth}
+				\begin{figure}
+					\includegraphics[width=0.7\linewidth]{microDNS core.png}
+					\caption{Architecture et placement de \texttt{microDNS}}
+				\end{figure}
+			\end{column}
+		\end{columns}
+	\end{frame}
+
+	% Architecture microDNS
+	\begin{frame}
+		\frametitle{Architecture du Gestionnaire \texttt{microDNS}}
+		\begin{columns}[T] % Split frame into columns
+			\begin{column}{0.5\textwidth}
+				\RaggedRight % Justify text to the left
+				\textbf{Positionnement :}
+				\begin{itemize}
+					\item Intercepte les requêtes DNS très tôt dans la chaîne du système local.
+					\item Remplace \texttt{/etc/resolv.conf} pour pointer vers \texttt{microDNS} (ex: 127.0.0.1:53).
+					\item Gère la complexité introduite par des services comme \texttt{systemd-resolved}.
+				\end{itemize}
+			\end{column}
+			\begin{column}{0.5\textwidth}
+				\begin{figure}
+					\includegraphics[width=0.7\linewidth]{microDNS core.png}
+					\caption{Architecture et placement de \texttt{microDNS}}
+				\end{figure}
+			\end{column}
+		\end{columns}
+	\end{frame}
+
+	% Architecture microDNS
+	\begin{frame}
+		\frametitle{Architecture du Gestionnaire \texttt{microDNS}}
+				\begin{figure}
+					\centering
+					\includegraphics[width=0.4\linewidth]{microDNS core.png}
+					\caption{Architecture et placement de \texttt{microDNS}}
+				\end{figure}
+	\end{frame}
+
+	% Architecture MicroVM et Firecracker
+    \section{Architecture Interne des MicroVM Firecracker}
+	\begin{frame}
+		\frametitle{Architecture Interne des MicroVM Firecracker}
+		\begin{columns}[T]
+			\begin{column}{0.5\textwidth}
+				\RaggedRight
+				Chaque instance Firecracker exécute une microVM isolée.
+
+				\textbf{Composants internes à la \\ microVM :}
+				\begin{itemize}
+					\item Serveur web (Flask) : Exécute la fonction utilisateur demandée via HTTP et retourne le résultat.
+					\item Exécutables des fonctions utilisateurs.
+					\item Programme de communication avec \texttt{microDNS} (via \texttt{Vsock}, non implémenté).
+				\end{itemize}
+			\end{column}
+			\begin{column}{0.48\textwidth}
+				\begin{figure}
+					\includegraphics[width=\linewidth]{microVM core.png}
+					\caption{Architecture interne d'une microVM}
+				\end{figure}
+			\end{column}
+		\end{columns}
+	\end{frame}
+
+	% Architecture MicroVM et Firecracker
+	\begin{frame}
+		\frametitle{Architecture Interne des MicroVM Firecracker}
+		\begin{columns}[T]
+			\begin{column}{0.5\textwidth}
+				\RaggedRight
+				\textbf{Communication interne et externe :}
+				\begin{itemize}
+					\item \texttt{Vsock} : Communication directe avec le gestionnaire \texttt{microDNS} sur l'hôte (contourne la pile réseau).
+					\item FIFO POSIX : Communication entre le serveur web et le programme \texttt{Vsock} pour instructions
+					\item Messages "Heartbeat" : Envoyés à \texttt{microDNS} pour monitoring.
+				\end{itemize}
+			\end{column}
+			\begin{column}{0.5\textwidth}
+				\begin{figure}
+					\includegraphics[width=\linewidth]{microVM core.png}
+					\caption{Architecture interne d'une microVM}
+				\end{figure}
+			\end{column}
+		\end{columns}
+	\end{frame}
+
+	% Architecture MicroVM et Firecracker
+	\begin{frame}
+		\frametitle{Architecture Interne des MicroVM Firecracker}
+				\begin{figure}
+					\centering
+					\includegraphics[width=0.7\linewidth]{microVM core.png}
+					\caption{Architecture interne d'une microVM}
+				\end{figure}
+	\end{frame}
+
+	% Choix d'Implémentation
+    \section{Choix d'Implémentation Majeurs}
+	\begin{frame}
+		\frametitle{Choix d'Implémentation Majeurs}
+		\textbf{\texttt{microDNS} (Proxy et Gestionnaire DNS)}
+		\begin{itemize}
+			\item \textbf{Langage :} C++
+			\begin{itemize}
+				\item Contrôle bas niveau (sockets, paquets DNS, interfaces TAP).
+				\item Facilités haut niveau (STL, POO, threads) pour un développement accéléré.
+			\end{itemize}
+			\item \textbf{Classes clés implémentées :}
+			\begin{itemize}
+				\item \texttt{ConfigLoader} : Chargement de configuration (\texttt{./microDNS.conf}).
+				\item \texttt{MessageQueue} : Communication asynchrone inter-threads.
+				\item \texttt{QueryReceiver} : Réception des requêtes DNS.
+				\item \texttt{QueryForwarder} : Transmission des requêtes DNS.
+			\end{itemize}
+		\end{itemize}
+	\end{frame}
+
+	% Choix d'Implémentation
+	\begin{frame}
+		\frametitle{Choix d'Implémentation Majeurs}
+		\textbf{Préparation pour Firecracker}
+		\begin{itemize}
+			\item Définition de configurations de microVM type : \texttt{vm\_config.json} (template) et \texttt{vm\_test\_config.json} (pour tests).
+			\begin{itemize}
+				\item Spécification : image noyau, arguments de boot, rootfs, vCPUs, mémoire, réseau.
+			\end{itemize}
+			\item Scripts pour la création du rootfs, compilation du noyau, et téléchargement de Firecracker.
+		\end{itemize}
+	\end{frame}
+
+	% Fonctionnalités Réalisées
+    \section{Fonctionnalités Réalisées}
+	\begin{frame}
+		\frametitle{Fonctionnalités Réalisées}
+		\begin{itemize}
+			\item \textbf{Fondations du proxy/serveur DNS \texttt{microDNS} :}
+			\begin{itemize}
+				\item Réception et analyse basique des requêtes DNS.
+				\item Mécanisme de transmission (forwarding) des requêtes DNS géré par \texttt{QueryForwarder}.
+				\item Utilisation de files de messages (\texttt{MessageQueue}) pour une gestion asynchrone.
+				\item Système de chargement de configuration dynamique (\texttt{ConfigLoader} via \texttt{microDNS.conf}).
+			\end{itemize}
+		\end{itemize}
+	\end{frame}
+
+		% Fonctionnalités Réalisées
+	\begin{frame}
+		\frametitle{Fonctionnalités Réalisées}
+		\begin{itemize}
+			\item \textbf{Configuration des microVM Firecracker :}
+			\begin{itemize}
+				\item Fichier \texttt{vm\_config.json} et \texttt{vm\_test\_config.json} pour spécifier les paramètres des microVMs.
+				\item Capacité à lancer manuellement des microVMs Firecracker avec la configuration adéquate pour exécuter des fonctions.
+			\end{itemize}
+		\end{itemize}
+	\end{frame}
+
+	% État du Projet et Prochaines Étapes
+    \section{État Actuel, Difficultés et Perspectives}
+	\begin{frame}
+		\frametitle{État Actuel, Difficultés et Perspectives}
+		\textbf{Parties Incomplètes :}
+		\begin{itemize}
+			\item Intégration complète du lancement et de la gestion des microVM Firecracker par \texttt{microDNS} (via le composant \texttt{MicroVMManager}).
+			\item Implémentation du communicateur \texttt{Vsock} pour la liaison microVM $\leftrightarrow$ hôte.
+			\item Monitoring avancé et chaînage des fonctions.
+		\end{itemize}
+	\end{frame}
+
+		% État du Projet et Prochaines Étapes
+	\begin{frame}
+		\frametitle{État Actuel, Difficultés et Perspectives}
+		\textbf{Difficultés Rencontrées :}
+		\begin{itemize}
+			\item Complexité de l'intégration avec \texttt{systemd-resolved}.
+			\item Mise en place de l'environnement de développement (macOS, virtualisation imbriquée).
+			\item Compréhension initiale du sujet et de l'idéologie Firecracker.
+		\end{itemize}
+		\vspace{0.5em}
+		\textbf{Améliorations Possibles :}
+		\begin{itemize}
+			\item Optimisation des performances DNS de \texttt{microDNS}.
+			\item Utilisation du "jailer" de Firecracker et renforcement de l'isolation.
+		\end{itemize}
+	\end{frame}
+
+	% Usage (Très bref)
+    \section{Usage et Démonstration (État Actuel)}
+	\begin{frame}
+		\frametitle{Usage et Démonstration (État Actuel)}
+		\textbf{Pour \texttt{microDNS} :}
+		\begin{enumerate}
+			\item Naviguer vers \texttt{dns/}.
+			\item Compiler : \texttt{make microDNS}.
+			\item Configurer l'environnement DNS (scripts) : \texttt{cd scripts/ \&\& ./microDNS.sh setup}.
+			\item Lancer : \texttt{cd .. \&\& build/microDNS}.
+		\end{enumerate}
+	\end{frame}
+
+	% Usage (Très bref)
+	\begin{frame}
+		\frametitle{Usage et Démonstration (État Actuel)}
+		\textbf{Pour Firecracker (Tests Manuels) :}
+		\begin{enumerate}
+			\item Naviguer vers \texttt{firecracker/}.
+			\item Préparer l'environnement : \texttt{make} (téléchargements, création rootfs, compilation noyau).
+			\item Lancer une microVM interactive : \texttt{make test} (login: root, pas de mdp).
+			\item \textit{Tester l'exécution de fonction :}
+			\begin{itemize}
+				\item Modifier \texttt{vm\_test\_config.json}, ajouter à \texttt{boot\_args} : \texttt{init=/init.sh -- ./test.sh}.
+				\item Lancer avec \texttt{make test}.
+				\item Accéder à \texttt{http://172.16.0.2:8000} dans un navigateur pour voir le résultat de \texttt{test.sh}.
+			\end{itemize}
+		\end{enumerate}
+	\end{frame}
+
+	% Conclusion
+	\begin{frame}
+		\frametitle{Conclusion et Questions}
+		\begin{itemize}
+			\item Les fondations DNS du projet sont établies et fonctionnelles.
+			\item La configuration et le lancement manuel de microVM pour l'exécution de fonctions sont possibles.
+			\item L'intégration complète et l'automatisation via \texttt{microDNS} constituent la principale prochaine étape.
+		\end{itemize}
+		\vfill
+		\centering
+		\textit{Merci pour votre attention !}
+		\vspace{1em}
+		Des questions ?
+	\end{frame}
+
+\end{document}

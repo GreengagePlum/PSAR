@@ -1,12 +1,14 @@
+OUT= rapport.pdf slides.pdf
+SRC= $(patsubst %.pdf,%.tex,$(OUT))
+
 .PHONY: all clean
 
-all: rapport
+all: $(OUT)
 
-rapport: rapport.pdf
-
-rapport.pdf: rapport.tex
-	latexmk -pdfxe rapport.tex
+%.pdf: %.tex
+	latexmk -pdfxe $<
 
 clean:
-	rm -f rapport.pdf
-	latexmk -c rapport.tex
+	rm -f $(OUT)
+	# latexmk -c $(SRC)
+	latexmk -c
